@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netwatch"
+version = "0.1.0"
+description = "Network traffic analyzer CLI for passive local monitoring"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "scapy>=2.5",
+]
+
+[project.scripts]
+netwatch = "netwatch.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
