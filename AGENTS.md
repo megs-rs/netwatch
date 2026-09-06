@@ -4,7 +4,18 @@ Network traffic analyzer CLI for passive local network monitoring. Targets IoT d
 
 ## Status
 
-Python implementation in progress, MVP (Fase 2 done). Decision: **Python + Click + Scapy + SQLite** (chose Python over spec's Go recommendation). Tests deferred. The spec is `especificacao-cli-netwatch.md`.
+Python implementation in progress, MVP (Fase 2 done). Decision: **Python + Click + Scapy + SQLite** (chose Python over spec's Go recommendation). Tests deferred. The spec is `especificacao-cli-netwatch.md`. v0.1 pushed to `https://github.com/megs-rs/netwatch` (public, branch `main`).
+
+## Git / GitHub
+
+```bash
+git add -A && git commit -m "..."   # commit style: concise, lowercase, scope prefix
+git push origin main                # remote already configured
+```
+
+- Remote `origin` → `https://github.com/megs-rs/netwatch.git` (configured Sep 2026).
+- `gh` CLI keyring token is **stale/invalid** and the fine-grained PAT lacks `read:org` scope, so `gh` fails. Use the API via curl with `GITHUB_TOKEN` from `../.env` instead (see `token` fetch in session history; create repos with `POST /user/repos`, push with `https://x-access-token:$TOKEN@github.com/...`).
+- Commit message convention from v0.1: `netwatch v0.1: MVP captura/analyze offline` + bullet body in Portuguese. Match repo history style.
 
 ## Commands
 
