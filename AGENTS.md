@@ -11,12 +11,12 @@ MVP (Fase 2 done). **Python 3.11+ + Click + Scapy + SQLite** (chose Python over 
 ```bash
 pip install -e .            # install deps (click, scapy)
 netwatch                    # CLI entry (click group in netwatch/cli.py)
+netwatch capture start -i wlp0s20f3 --duration 30s --db ./netwatch.db  # live capture + ingest
 netwatch analyze offline capture.pcap --db ./netwatch.db
 netwatch devices list --db <path>   # also: flows list, summary, export
 ```
 
-Working: `analyze offline`, `devices list/rename/tag`, `flows list`, `summary`, `export`.
-Stubs: `capture start/stop/status`.
+Working: `capture start/stop/status`, `analyze offline`, `devices list/rename/tag`, `flows list`, `summary`, `export`, `config`.
 Out of scope: `alerts check`, `watch`, enrichment flags, `--capture-payload`.
 
 ## Git / GitHub
@@ -36,7 +36,9 @@ git push origin main
 netwatch/
 ├── cli.py              # Click entry, all commands
 ├── output.py           # format_output(): table/json/csv
-├── capture/engine.py   # Scapy wrappers: read_packets(), iter_packets()
+├── capture/
+│   ├── engine.py       # Scapy wrappers: read_packets(), sniff_packets(), can_capture()
+│   └── state.py        # capture.status JSON: pid/interface/started_at for stop/status
 ├── analyzer/
 │   ├── flow.py         # 5-tuple flow aggregation, bidirectional
 │   ├── protocol.py     # L4 header + L7 (port table + DPI: TLS, HTTP, SSH)
@@ -58,6 +60,7 @@ netwatch/
 - `--format json|csv|table` is global; `format_output()` in `output.py` dispatches.
 - Default DB: `~/.netwatch/netwatch.db`; auto-creates parent dirs and schema.
 - Live capture needs root/CAP_NET_RAW; offline pcap processing does not.
+- `capture start` runs in foreground (`--duration` or Ctrl+C) and ingests packets in batches through the same `build_flows`/`collect_devices` path as `analyze offline`. Live capture state lives in `~/.netwatch/capture.status` (written by the capturing process — if run via sudo, state goes to root's home, so `stop`/`status` must run as the same user).
 - `analyze offline` auto-finds `data/oui.txt` for OUI lookup if present.
 
 ## Conventions

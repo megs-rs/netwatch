@@ -14,6 +14,9 @@ Requer Python 3.11+. Dependências: `click`, `scapy`.
 
 ```bash
 netwatch --help
+netwatch capture start -i wlp0s20f3 --duration 30s --db ./netwatch.db
+netwatch capture status
+netwatch capture stop
 netwatch analyze offline capture.pcap --db ./netwatch.db
 netwatch devices list --db ./netwatch.db
 netwatch devices rename AA:BB:CC:DD:EE:FF "Câmera Sala"
@@ -31,6 +34,21 @@ netwatch config
 ### Filtros temporais
 
 `--since 24h`, `--since 7d`, `--since 30d` — aceita `Nd`, `Nh`, `Nm` ou número inteiro (dias).
+
+### Captura ao vivo
+
+`capture start` captura de uma interface e ingere direto no DB:
+
+```bash
+netwatch capture start -i eth0 --duration 30s        # para após 30s
+netwatch capture start -i eth0                       # contínuo; Ctrl+C para parar
+netwatch capture status                              # estado da captura ativa
+netwatch capture stop                                # encerra captura
+```
+
+`--duration` aceita `10`, `30s`, `5m`, `1h` ou `continuous`. Para captura contínua com `stop`/`status` de outro processo, rode `capture start` em background.
+
+Requer `root`/`CAP_NET_RAW` para capturar. Alternativa sem privilégio: capture com `tcpdump` e use `analyze offline`.
 
 ## Arquitetura
 
@@ -65,17 +83,18 @@ Para lookup MAC → vendor, coloque o arquivo IEEE OUI em `data/oui.txt`. O coma
 
 | Comando | Status |
 |---|---|
+| `capture start/stop/status` | Funcional |
 | `analyze offline` | Funcional |
 | `devices list/rename/tag` | Funcional |
 | `flows list` | Funcional |
 | `summary`, `export`, `config` | Funcional |
-| `capture start/stop/status` | Stub (não implementado) |
 
 ### Fora do escopo
 
 - `alerts check`, `watch`
 - Flags de enriquecimento (`--resolve-dns`, `--asn`)
 - `--capture-payload`
+- Captura em modo `mirror`/`gateway` (aceita as flags, mas trata igual a `live`)
 
 ## Licença
 

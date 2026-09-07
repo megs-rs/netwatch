@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import signal
 import sys
+import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -34,25 +37,128 @@ def capture() -> None:
 @capture.command("start")
 @click.option("-i", "--interface", required=True, help="Network interface to capture")
 @click.option("--mode", default="live", type=click.Choice(["live", "mirror", "gateway"]))
-@click.option("--duration", default="continuous", help="Capture duration (1h, 24h, continuous)")
+@click.option("--duration", default="continuous", help="Capture duration (e.g. 10, 30s, 5m, continuous)")
 @click.option("--filter", "bpf_filter", default="", help="BPF filter (tcpdump syntax)")
 @click.option("--db", default=DEFAULT_DB, help="SQLite database path")
 def capture_start(interface: str, mode: str, duration: str, bpf_filter: str, db: str) -> None:
-    """Start live packet capture."""
-    click.echo(f"Capture not yet implemented (interface={interface}, mode={mode})")
+    """Start live packet capture and ingest into the database."""
+    from netwatch.analyzer.device import collect_devices
+    from netwatch.analyzer.flow import build_flows
+    from netwatch.capture.engine import can_capture, interface_exists, sniff_packets
+    from netwatch.capture.state import clear_state, write_state
+    from netwatch.enrichment.oui import OUIDatabase
+
+    if not interface_exists(interface):
+        click.echo(f"Interface {interface} not found", err=True)
+        sys.exit(1)
+    if not can_capture():
+        click.echo("Live capture requires root / CAP_NET_RAW.", err=True)
+        click.echo("Run with sudo or grant the capability:", err=True)
+        click.echo("  sudo setcap cap_net_raw+ep $(which netwatch)", err=True)
+        sys.exit(1)
+
+    default_oui = Path(__file__).parent.parent / "data" / "oui.txt"
+    oui_db = OUIDatabase(str(default_oui)) if default_oui.exists() else None
+
+    database = _get_db(db)
+    state_path = write_state(interface)
+
+    stop_flag = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop_flag.set())
+    signal.signal(signal.SIGINT, lambda *_: stop_flag.set())
+
+    seconds = _parse_capture_duration(duration)
+    started = time.monotonic()
+    total_packets = 0
+    total_flows = 0
+    total_devices = 0
+    click.echo(f"Capturing on {interface} (mode={mode}) ...", err=True)
+    if seconds is None:
+        click.echo("  press Ctrl+C to stop", err=True)
+
+    try:
+        while True:
+            if stop_flag.is_set():
+                break
+            remaining = None
+            if seconds is not None:
+                elapsed = time.monotonic() - started
+                if elapsed >= seconds:
+                    break
+                remaining = min(10, seconds - elapsed)
+
+            packets = sniff_packets(interface, timeout=remaining or 10, bpf_filter=bpf_filter)
+            if not packets:
+                if seconds is None and not stop_flag.is_set():
+                    continue
+                break
+
+            flows = build_flows(packets)
+            devices = collect_devices(packets, oui_db=oui_db)
+            for flow in flows:
+                database.insert_flow(flow)
+            for device in devices:
+                database.upsert_device(device)
+            total_packets += len(packets)
+            total_flows += len(flows)
+            total_devices += len(devices)
+            click.echo(f"  +{len(packets)} packets, {len(flows)} flows, {len(devices)} devices", err=True)
+            if seconds is not None and time.monotonic() - started >= seconds:
+                break
+    finally:
+        clear_state(state_path)
+
+    click.echo(f"Done: {total_packets} packets, {total_flows} flows, {total_devices} devices -> {db}")
 
 
 @capture.command("stop")
-def capture_stop() -> None:
+@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
+def capture_stop(db: str) -> None:
     """Stop a running capture."""
-    click.echo("Capture stop not yet implemented.")
+    from netwatch.capture.state import clear_state, read_state, stop_capture
+
+    state = read_state()
+    if not state:
+        click.echo("No capture running.")
+        return
+    if stop_capture():
+        click.echo(f"Stopping capture on {state.get('interface', '?')} (pid {state.get('pid')}).")
+    else:
+        click.echo("Capture process not running; clearing state.", err=True)
+    clear_state()
 
 
 @capture.command("status")
 @click.option("--db", default=DEFAULT_DB, help="SQLite database path")
 def capture_status(db: str) -> None:
     """Show capture status."""
-    click.echo("Capture status not yet implemented.")
+    from datetime import datetime as _dt
+
+    from netwatch.capture.state import process_alive, read_state
+
+    state = read_state()
+    if not state:
+        click.echo("No capture running.")
+        return
+    pid = state.get("pid")
+    interface = state.get("interface", "?")
+    started_at = state.get("started_at")
+    alive = process_alive(pid) if pid else False
+    uptime = ""
+    if alive and started_at:
+        try:
+            diff = _dt.utcnow() - _dt.fromisoformat(started_at)
+            uptime = f"{int(diff.total_seconds())}s"
+        except ValueError:
+            pass
+    status = "running" if alive else "stopped"
+    click.echo(f"Status: {status}")
+    click.echo(f"Interface: {interface}")
+    click.echo(f"PID: {pid}")
+    if uptime:
+        click.echo(f"Uptime: {uptime}")
+    if not alive:
+        click.echo("  (stale state; run 'capture stop' to clear)")
 
 
 # --- analyze ---
@@ -304,6 +410,24 @@ def config(db: str) -> None:
 
 
 # --- helpers ---
+
+def _parse_capture_duration(s: str) -> int | None:
+    """Parse a capture duration like '10', '30s', '5m', '1h' into seconds. None = continuous."""
+    s = s.strip().lower()
+    if s == "continuous":
+        return None
+    if s.endswith("s"):
+        return max(1, int(s[:-1]))
+    if s.endswith("m"):
+        return max(1, int(s[:-1]) * 60)
+    if s.endswith("h"):
+        return max(1, int(s[:-1]) * 3600)
+    try:
+        return max(1, int(s))
+    except ValueError:
+        click.echo(f"Invalid duration: {s}", err=True)
+        sys.exit(1)
+
 
 def _parse_duration(s: str) -> datetime:
     """Parse a duration string like '24h', '7d', '30d' into a datetime."""
