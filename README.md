@@ -24,6 +24,7 @@ netwatch devices tag AA:BB:CC:DD:EE:FF iot
 netwatch flows list --device AA:BB:CC:DD:EE:FF --format json
 netwatch summary --since 7d
 netwatch export -o export.csv --format csv
+netwatch update-oui
 netwatch config
 ```
 
@@ -48,7 +49,16 @@ netwatch capture stop                                # encerra captura
 
 `--duration` aceita `10`, `30s`, `5m`, `1h` ou `continuous`. Para captura contínua com `stop`/`status` de outro processo, rode `capture start` em background.
 
-Requer `root`/`CAP_NET_RAW` para capturar. Alternativa sem privilégio: capture com `tcpdump` e use `analyze offline`.
+Requer `root`/`CAP_NET_RAW` para capturar.
+
+## Demo / smoke test
+
+```bash
+./demo.sh                 # captura 30min e mostra todas as saídas
+./demo.sh wlp0s20f3 60    # override: interface + duração em segundos
+```
+
+O `demo.sh` captura, analisa e imprime todos os outputs (devices, flows, summary, export, config). Lida com a necessidade de `sudo` automaticamente.
 
 ## Arquitetura
 
@@ -56,12 +66,16 @@ Requer `root`/`CAP_NET_RAW` para capturar. Alternativa sem privilégio: capture 
 netwatch/
 ├── cli.py              # Click entry, todos os comandos
 ├── output.py           # format_output(): table/json/csv
-├── capture/engine.py   # Scapy: read_packets(), iter_packets()
+├── capture/
+│   ├── engine.py       # Scapy: read_packets(), sniff_packets(), can_capture()
+│   └── state.py        # estado de captura (pid/interface/started_at)
 ├── analyzer/
 │   ├── flow.py         # Agregação bidirecional de flows (5-tuple)
 │   ├── protocol.py     # Classificação L4 + DPI L7 (TLS, HTTP, SSH)
 │   └── device.py       # Extração de MAC, hostname via DNS
-├── enrichment/oui.py   # MAC → vendor (IEEE OUI)
+├── enrichment/
+│   ├── oui.py          # MAC → vendor (6/7/9 hex prefixes)
+│   └── fetch.py        # download da base OUI (nmap-mac-prefixes)
 └── storage/
     ├── db.py           # SQLite (WAL mode) + CRUD
     └── models.py       # Dataclasses: Device, Flow, DNSLog
@@ -85,7 +99,7 @@ netwatch update-oui --url <URL>        # fonte alternativa
 
 ## Status
 
-**v0.1 (MVP)** — Fase 2 concluída.
+**v0.3 (MVP)** — Fase 2 concluída.
 
 | Comando | Status |
 |---|---|

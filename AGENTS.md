@@ -4,7 +4,7 @@ Network traffic analyzer CLI for passive local network monitoring. Targets IoT d
 
 ## Status
 
-MVP (Fase 2 done). **Python 3.11+ + Click + Scapy + SQLite** (chose Python over spec's Go recommendation). Tests deferred. Spec: `especificacao-cli-netwatch.md`. v0.1 pushed to `https://github.com/megs-rs/netwatch` (public, branch `main`).
+MVP (Fase 2 done, agora v0.3). **Python 3.11+ + Click + Scapy + SQLite** (chose Python over spec's Go recommendation). Tests deferred. Spec: `especificacao-cli-netwatch.md`. Public repo at `https://github.com/megs-rs/netwatch` (branch `main`).
 
 ## Commands
 
@@ -65,6 +65,8 @@ netwatch/
 - Live capture needs root/CAP_NET_RAW; offline pcap processing does not.
 - `capture start` runs in foreground (`--duration` or Ctrl+C) and ingests packets in batches through the same `build_flows`/`collect_devices` path as `analyze offline`. Live capture state lives in `~/.netwatch/capture.status` (written by the capturing process — if run via sudo, state goes to root's home, so `stop`/`status` must run as the same user).
 - `analyze offline` auto-finds `data/oui.txt` for OUI lookup if present. `netwatch update-oui` downloads it (nmap-mac-prefixes); `data/oui.txt` is gitignored.
+- **`demo.sh`** is the end-to-end smoke test: captures N seconds (default 1800s/30min) then prints every query. Run `./demo.sh [iface] [seconds]`.
+- **sudo + editable install gotcha**: `pip install -e .` puts the `netwatch` script in the user's `~/.local/bin`, and scapy/click in the user's site-packages. Under `sudo`, root can't import `netwatch` or `scapy` (not on root's PYTHONPATH/sys.path). `demo.sh` works around it by running `sudo PYTHONPATH="$(python -c 'import sys; print(":".join(sys.path))')" "$(command -v netwatch)" ...` and later copying the DB back with `chown`. This is why captures run via sudo write state to `/root/.netwatch/capture.status`.
 
 ## Conventions
 
