@@ -4,70 +4,64 @@ Network traffic analyzer CLI for passive local network monitoring. Targets IoT d
 
 ## Status
 
-Python implementation in progress, MVP (Fase 2 done). Decision: **Python + Click + Scapy + SQLite** (chose Python over spec's Go recommendation). Tests deferred. The spec is `especificacao-cli-netwatch.md`. v0.1 pushed to `https://github.com/megs-rs/netwatch` (public, branch `main`).
-
-## Git / GitHub
-
-```bash
-git add -A && git commit -m "..."   # commit style: concise, lowercase, scope prefix
-git push origin main                # remote already configured
-```
-
-- Remote `origin` → `https://github.com/megs-rs/netwatch.git` (configured Sep 2026).
-- `gh` CLI keyring token is **stale/invalid** and the fine-grained PAT lacks `read:org` scope, so `gh` fails. Use the API via curl with `GITHUB_TOKEN` from `../.env` instead (see `token` fetch in session history; create repos with `POST /user/repos`, push with `https://x-access-token:$TOKEN@github.com/...`).
-- Commit message convention from v0.1: `netwatch v0.1: MVP captura/analyze offline` + bullet body in Portuguese. Match repo history style.
+MVP (Fase 2 done). **Python 3.11+ + Click + Scapy + SQLite** (chose Python over spec's Go recommendation). Tests deferred. Spec: `especificacao-cli-netwatch.md`. v0.1 pushed to `https://github.com/megs-rs/netwatch` (public, branch `main`).
 
 ## Commands
 
 ```bash
 pip install -e .            # install deps (click, scapy)
 netwatch                    # CLI entry (click group in netwatch/cli.py)
-netwatch analyze offline capture.pcap --db ./netwatch.db  # offline pcap analysis
-netwatch devices list --db <path>   # also: config, flows list, summary, export
+netwatch analyze offline capture.pcap --db ./netwatch.db
+netwatch devices list --db <path>   # also: flows list, summary, export
 ```
 
 Working: `analyze offline`, `devices list/rename/tag`, `flows list`, `summary`, `export`.
 Stubs: `capture start/stop/status`.
-Out of scope: `alerts check`, `watch`, enrichment (`--resolve-dns/asn`), `--capture-payload`.
+Out of scope: `alerts check`, `watch`, enrichment flags, `--capture-payload`.
+
+## Git / GitHub
+
+```bash
+git add -A && git commit -m "..."   # concise, lowercase, scope prefix
+git push origin main
+```
+
+- Remote `origin` → `https://github.com/megs-rs/netwatch.git`.
+- **`gh` CLI is broken** (stale keyring token, PAT lacks `read:org`). Use `curl` with `GITHUB_TOKEN` from `../.env` instead.
+- Commit style: `netwatch v0.1: ...` + bullet body in Portuguese. Match repo history.
 
 ## Architecture
 
 ```
 netwatch/
 ├── cli.py              # Click entry, all commands
-├── output.py           # table/json/csv formatting helpers (format_output)
-├── capture/
-│   └── engine.py       # Scapy wrappers: read_packets(), iter_packets()
+├── output.py           # format_output(): table/json/csv
+├── capture/engine.py   # Scapy wrappers: read_packets(), iter_packets()
 ├── analyzer/
-│   ├── flow.py         # 5-tuple flow aggregation, direction classification
-│   ├── protocol.py     # L4 (header) + L7 (port table + DPI: TLS, HTTP, SSH)
+│   ├── flow.py         # 5-tuple flow aggregation, bidirectional
+│   ├── protocol.py     # L4 header + L7 (port table + DPI: TLS, HTTP, SSH)
 │   └── device.py       # MAC extraction, hostname from DNS
-├── enrichment/
-│   └── oui.py          # OUIDatabase class for MAC→vendor lookup
+├── enrichment/oui.py   # OUIDatabase: MAC→vendor lookup
 └── storage/
     ├── db.py           # SQLite Database class (WAL mode) + CRUD
-    └── models.py       # dataclasses: Device, Flow, DNSLog (L4Protocol, Direction enums)
+    └── models.py       # dataclasses: Device, Flow, DNSLog; enums: L4Protocol, Direction
 ```
 
 ## Non-obvious details
 
-- `analyze offline` reads pcap via Scapy's `rdpcap()`, builds flows via 5-tuple aggregation, classifies L4 from header + L7 via port table + DPI (detects TLS handshake 0x16 0x03, HTTP GET/POST, SSH banner), extracts TLS SNI. Stores flows + devices in SQLite.
-- **Flow aggregation is bidirectional per local device.** `build_flows()` first discovers all local (private) IPs in the pcap, then for each packet associates the flow with whichever endpoint is private. Request and reply packets are merged into a single flow keyed by `(local_ip, remote_ip, local_port, remote_port, l4)`, so `bytes_sent`/`bytes_received` correctly split upload vs download. Never key on directional src/dst or you lose the received side.
-- `collect_devices()` only records MACs whose source IP is private — otherwise the gateway ends up collecting all external IPs from reply packets (a real bug that was fixed).
-- **TLS SNI extraction** (`_extract_sni_from_raw`): offset walks record header (5B) + handshake header (4B) + client version (2B) + random (32B) + session_id, then ciphers, compression, and extensions; must skip the 32-byte random before reading session_id_len. Verified against real ClientHellos.
-- `devices list --sort bytes_total|flow_count` uses a LEFT JOIN with flows table for accurate per-device aggregates.
-- Storage layer uses **dataclass** models ↔ SQLite via `Database` in `netwatch/storage/db.py`. Writes are per-row `commit()`.
-- Datetimes stored as ISO strings; comparisons use ISO strings (lexicographic order works).
-- `--format json|csv|table` is a global CLI convention; `format_output()` in `output.py` dispatches.
-- Duration parsing helper `_parse_duration()` (`24h`, `7d`, `30d`) in `cli.py`; reuse it.
-- `_human_bytes()` format helper in `cli.py`.
-- Default DB `~/.netwatch/netwatch.db`; `Database` auto-creates parent dirs and schema.
-- SQLite uses WAL mode + foreign_keys ON; device IP history kept in `device_ips` table.
-- Live capture needs root/CAP_NET_RAW; offline pcap processing has no privilege requirement.
-- OUI lookup: `OUIDatabase("data/oui.txt")` loads prefix→vendor map. `analyze offline` auto-finds `data/oui.txt` if present.
-- Privacy/spec guards (`--i-have-authorization`, `--anonymize`, `--capture-payload` warning) not yet implemented.
+- **Flow aggregation is bidirectional per local device.** `build_flows()` discovers all private IPs in the pcap, then merges request+reply into one flow keyed by `(local_ip, remote_ip, local_port, remote_port, l4)`. `bytes_sent`/`bytes_received` split upload vs download. Never key on directional src/dst.
+- `collect_devices()` only records MACs whose **source IP is private** — otherwise the gateway collects all external IPs from reply packets (real bug, already fixed).
+- **TLS SNI extraction** (`_extract_sni_from_raw`): walks record header (5B) + handshake header (4B) + client version (2B) + random (32B) + session_id, then ciphers, compression, extensions. Must skip the 32-byte random before `session_id_len`.
+- `devices list --sort bytes_total|flow_count` uses a LEFT JOIN with flows table.
+- Storage: dataclass models ↔ SQLite via `Database` in `storage/db.py`. Per-row `commit()`. WAL + foreign_keys ON. Device IPs in `device_ips` table.
+- Datetimes stored as ISO strings; lexicographic comparison works.
+- `--format json|csv|table` is global; `format_output()` in `output.py` dispatches.
+- Default DB: `~/.netwatch/netwatch.db`; auto-creates parent dirs and schema.
+- Live capture needs root/CAP_NET_RAW; offline pcap processing does not.
+- `analyze offline` auto-finds `data/oui.txt` for OUI lookup if present.
 
 ## Conventions
 
-- No comments in code (project convention).
-- No tests yet.
+- Docstrings and section markers (`# --- capture ---`) are used in code; no inline explanatory comments.
+- No tests yet. `ruff` is a dev dependency but has no config section — just `ruff check` if needed.
+- No CI workflows configured.

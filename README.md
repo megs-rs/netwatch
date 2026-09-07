@@ -1,0 +1,82 @@
+# NetWatch
+
+Analisador de tráfego de rede local via CLI. Foco: auditoria de dispositivos IoT (câmeras IP etc.) — quem o dispositivo conversa, que tipo de tráfego, e quanto.
+
+## Instalação
+
+```bash
+pip install -e .
+```
+
+Requer Python 3.11+. Dependências: `click`, `scapy`.
+
+## Comandos
+
+```bash
+netwatch --help
+netwatch analyze offline capture.pcap --db ./netwatch.db
+netwatch devices list --db ./netwatch.db
+netwatch devices rename AA:BB:CC:DD:EE:FF "Câmera Sala"
+netwatch devices tag AA:BB:CC:DD:EE:FF iot
+netwatch flows list --device AA:BB:CC:DD:EE:FF --format json
+netwatch summary --since 7d
+netwatch export -o export.csv --format csv
+netwatch config
+```
+
+### Formato de saída
+
+`--format table|json|csv` disponível em `devices list`, `flows list`, `summary` e `export`.
+
+### Filtros temporais
+
+`--since 24h`, `--since 7d`, `--since 30d` — aceita `Nd`, `Nh`, `Nm` ou número inteiro (dias).
+
+## Arquitetura
+
+```
+netwatch/
+├── cli.py              # Click entry, todos os comandos
+├── output.py           # format_output(): table/json/csv
+├── capture/engine.py   # Scapy: read_packets(), iter_packets()
+├── analyzer/
+│   ├── flow.py         # Agregação bidirecional de flows (5-tuple)
+│   ├── protocol.py     # Classificação L4 + DPI L7 (TLS, HTTP, SSH)
+│   └── device.py       # Extração de MAC, hostname via DNS
+├── enrichment/oui.py   # MAC → vendor (IEEE OUI)
+└── storage/
+    ├── db.py           # SQLite (WAL mode) + CRUD
+    └── models.py       # Dataclasses: Device, Flow, DNSLog
+```
+
+## Banco de dados
+
+- Camada padrão: `~/.netwatch/netwatch.db`
+- Criado automaticamente na primeira execução (WAL + foreign keys ON)
+- `--db <path>` em qualquer comando para usar outro path
+
+## Enrichment OUI
+
+Para lookup MAC → vendor, coloque o arquivo IEEE OUI em `data/oui.txt`. O comando `analyze offline` procura automaticamente nesse path.
+
+## Status
+
+**v0.1 (MVP)** — Fase 2 concluída.
+
+| Comando | Status |
+|---|---|
+| `analyze offline` | Funcional |
+| `devices list/rename/tag` | Funcional |
+| `flows list` | Funcional |
+| `summary`, `export`, `config` | Funcional |
+| `capture start/stop/status` | Stub (não implementado) |
+
+### Fora do escopo
+
+- `alerts check`, `watch`
+- Flags de enriquecimento (`--resolve-dns`, `--asn`)
+- `--capture-payload`
+
+## Licença
+
+A definir.
