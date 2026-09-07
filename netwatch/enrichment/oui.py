@@ -23,14 +23,21 @@ class OUIDatabase:
                     continue
                 prefix, vendor = parts
                 prefix = prefix.replace(":", "").replace("-", "").lower()
-                if len(prefix) != 6:
+                if len(prefix) not in (6, 7, 9):
                     continue
                 self._oui[prefix] = vendor
 
     def lookup(self, mac: str) -> str:
         normalized = mac.replace(":", "").replace("-", "").lower()
-        prefix = normalized[:6]
-        return self._oui.get(prefix, "")
+        for size in (9, 7, 6):
+            prefix = normalized[:size]
+            vendor = self._oui.get(prefix)
+            if vendor is not None:
+                return vendor
+        return ""
+
+    def count(self) -> int:
+        return len(self._oui)
 
     def is_loaded(self) -> bool:
         return bool(self._oui)

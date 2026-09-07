@@ -2,7 +2,7 @@
 set -euo pipefail
 
 IFACE="${1:-wlp0s20f3}"
-DURATION="${2:-5}"
+DURATION="${2:-1800}"
 DB="./demo-netwatch.db"
 
 NC_BIN="$(command -v netwatch)"
@@ -30,7 +30,7 @@ run_capture() {
 echo "=== NetWatch Demo ==="
 echo ""
 
-echo "[1/3] Capturando $DURATION segundos na interface $IFACE ..."
+echo "[1/3] Capturando ${DURATION}s na interface $IFACE ..."
 run_capture
 echo ""
 

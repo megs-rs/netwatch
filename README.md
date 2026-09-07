@@ -75,7 +75,13 @@ netwatch/
 
 ## Enrichment OUI
 
-Para lookup MAC → vendor, coloque o arquivo IEEE OUI em `data/oui.txt`. O comando `analyze offline` procura automaticamente nesse path.
+Baixe a base de fabricantes (MAC → vendor) — formato `nmap-mac-prefixes` — e os comandos `analyze offline`/`capture start` resolvem vendors automaticamente:
+
+```bash
+netwatch update-oui                    # baixa para data/oui.txt
+netwatch update-oui --output /tmp/o.txt # destino customizado
+netwatch update-oui --url <URL>        # fonte alternativa
+```
 
 ## Status
 
@@ -88,6 +94,7 @@ Para lookup MAC → vendor, coloque o arquivo IEEE OUI em `data/oui.txt`. O coma
 | `devices list/rename/tag` | Funcional |
 | `flows list` | Funcional |
 | `summary`, `export`, `config` | Funcional |
+| `update-oui` | Funcional |
 
 ### Fora do escopo
 

@@ -24,24 +24,35 @@ def _get_db(db_path: str) -> Database:
 @click.group()
 @click.version_option(version=__version__, prog_name="netwatch")
 def main() -> None:
-    """NetWatch - Network traffic analyzer CLI."""
+    """NetWatch - Network traffic analyzer CLI for passive local monitoring.
+
+    Captures and analyzes network traffic to identify devices, protocols, and
+    data volume. Focus: IoT device auditing (cameras, smart home, etc.)."""
+    pass
 
 
 # --- capture ---
 
 @main.group()
 def capture() -> None:
-    """Capture network traffic."""
+    """Start, stop, or check the status of a live packet capture."""
 
 
 @capture.command("start")
-@click.option("-i", "--interface", required=True, help="Network interface to capture")
-@click.option("--mode", default="live", type=click.Choice(["live", "mirror", "gateway"]))
-@click.option("--duration", default="continuous", help="Capture duration (e.g. 10, 30s, 5m, continuous)")
-@click.option("--filter", "bpf_filter", default="", help="BPF filter (tcpdump syntax)")
-@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
+@click.option("-i", "--interface", required=True, help="Network interface to capture from (e.g. eth0, wlp0s20f3)")
+@click.option("--mode", default="live", type=click.Choice(["live", "mirror", "gateway"]),
+              help="Capture mode: live (direct interface), mirror (SPAN port), or gateway (router)")
+@click.option("--duration", default="continuous",
+              help="How long to capture: 30, 30s, 5m, 1h, or continuous (default)")
+@click.option("--filter", "bpf_filter", default="",
+              help="BPF filter to restrict capture (tcpdump syntax, e.g. 'port 443')")
+@click.option("--db", default=DEFAULT_DB, help="SQLite database path [default: ~/.netwatch/netwatch.db]")
 def capture_start(interface: str, mode: str, duration: str, bpf_filter: str, db: str) -> None:
-    """Start live packet capture and ingest into the database."""
+    """Start live packet capture on an interface and ingest into the database.
+
+    Requires root or CAP_NET_RAW. Packets are processed in batches and flows
+    are aggregated bidirectionally per local device. Use --duration to limit
+    capture time, or Ctrl+C to stop a continuous capture."""
     from netwatch.analyzer.device import collect_devices
     from netwatch.analyzer.flow import build_flows
     from netwatch.capture.engine import can_capture, interface_exists, sniff_packets
@@ -112,9 +123,8 @@ def capture_start(interface: str, mode: str, duration: str, bpf_filter: str, db:
 
 
 @capture.command("stop")
-@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
-def capture_stop(db: str) -> None:
-    """Stop a running capture."""
+def capture_stop() -> None:
+    """Stop a running capture started with 'capture start'."""
     from netwatch.capture.state import clear_state, read_state, stop_capture
 
     state = read_state()
@@ -129,9 +139,8 @@ def capture_stop(db: str) -> None:
 
 
 @capture.command("status")
-@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
-def capture_status(db: str) -> None:
-    """Show capture status."""
+def capture_status() -> None:
+    """Show status of a running capture (interface, PID, uptime)."""
     from datetime import datetime as _dt
 
     from netwatch.capture.state import process_alive, read_state
@@ -165,15 +174,19 @@ def capture_status(db: str) -> None:
 
 @main.group()
 def analyze() -> None:
-    """Analyze network data."""
+    """Analyze network data from capture files."""
 
 
 @analyze.command("offline")
 @click.argument("pcap_file", type=click.Path(exists=True))
-@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
-@click.option("--oui-file", default=None, help="Path to IEEE OUI database file")
+@click.option("--db", default=DEFAULT_DB, help="SQLite database path [default: ~/.netwatch/netwatch.db]")
+@click.option("--oui-file", default=None, help="Path to OUI vendor database (auto-detected from data/oui.txt)")
 def analyze_offline(pcap_file: str, db: str, oui_file: str | None) -> None:
-    """Analyze an existing .pcap/.pcapng file."""
+    """Analyze an existing .pcap/.pcapng capture file.
+
+    Reads all packets, builds bidirectional flows per local device, classifies
+    protocols (L4 + DPI), extracts TLS SNI, and stores results in SQLite.
+    Automatically uses data/oui.txt for MAC vendor lookup if present."""
     from netwatch.analyzer.device import collect_devices
     from netwatch.analyzer.flow import build_flows
     from netwatch.capture.engine import read_packets
@@ -206,17 +219,19 @@ def analyze_offline(pcap_file: str, db: str, oui_file: str | None) -> None:
 
 @main.group()
 def devices() -> None:
-    """Manage discovered devices."""
+    """List, rename, and tag discovered network devices."""
 
 
 @devices.command("list")
-@click.option("--tag", default=None, help="Filter by tag")
-@click.option("--since", default=None, help="Filter by activity since (e.g. 24h, 7d)")
-@click.option("--sort", default="last_seen", type=click.Choice(["bytes_total", "last_seen", "flow_count"]))
-@click.option("--format", "fmt", default="table", type=click.Choice(["table", "json", "csv"]))
-@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
+@click.option("--tag", default=None, help="Show only devices with this tag (e.g. camera, iot)")
+@click.option("--since", default=None, help="Show only devices active since this period (24h, 7d, 30d)")
+@click.option("--sort", default="last_seen", type=click.Choice(["bytes_total", "last_seen", "flow_count"]),
+              help="Sort devices by: last_seen, bytes_total, or flow_count")
+@click.option("--format", "fmt", default="table", type=click.Choice(["table", "json", "csv"]),
+              help="Output format (default: table)")
+@click.option("--db", default=DEFAULT_DB, help="SQLite database path [default: ~/.netwatch/netwatch.db]")
 def devices_list(tag: str | None, since: str | None, sort: str, fmt: str, db: str) -> None:
-    """List discovered devices."""
+    """List discovered devices with vendor, IP, alias, tags, and traffic stats."""
     from netwatch.output import format_output
 
     database = _get_db(db)
@@ -242,9 +257,12 @@ def devices_list(tag: str | None, since: str | None, sort: str, fmt: str, db: st
 @devices.command("rename")
 @click.argument("mac")
 @click.argument("alias")
-@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
+@click.option("--db", default=DEFAULT_DB, help="SQLite database path [default: ~/.netwatch/netwatch.db]")
 def devices_rename(mac: str, alias: str, db: str) -> None:
-    """Rename a device (set alias)."""
+    """Rename a device by setting a human-readable alias.
+
+    MAC can be full (aa:bb:cc:dd:ee:ff) or partial prefix. Alias replaces
+    any existing name for that device."""
     database = _get_db(db)
     if database.update_device_alias(mac, alias):
         click.echo(f"Device {mac} renamed to {alias}")
@@ -256,9 +274,11 @@ def devices_rename(mac: str, alias: str, db: str) -> None:
 @devices.command("tag")
 @click.argument("mac")
 @click.argument("tag")
-@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
+@click.option("--db", default=DEFAULT_DB, help="SQLite database path [default: ~/.netwatch/netwatch.db]")
 def devices_tag(mac: str, tag: str, db: str) -> None:
-    """Tag a device."""
+    """Tag a device with a category (e.g. camera, iot, trusted).
+
+    Tags can be used for filtering in 'devices list --tag' and for rules."""
     database = _get_db(db)
     if database.add_device_tag(mac, tag):
         click.echo(f"Tag '{tag}' added to device {mac}")
@@ -271,18 +291,19 @@ def devices_tag(mac: str, tag: str, db: str) -> None:
 
 @main.group()
 def flows() -> None:
-    """Manage network flows."""
+    """List and filter network flows (device-to-device connections)."""
 
 
 @flows.command("list")
-@click.option("--device", default=None, help="Filter by device MAC or alias")
-@click.option("--protocol", default=None, help="Filter by L4/L7 protocol")
-@click.option("--external-only", is_flag=True, help="Show only external traffic")
-@click.option("--internal-only", is_flag=True, help="Show only internal traffic")
-@click.option("--since", default=None, help="Filter since (e.g. 24h, 7d)")
-@click.option("--min-bytes", default=None, type=int, help="Filter flows above minimum bytes")
-@click.option("--format", "fmt", default="table", type=click.Choice(["table", "json", "csv"]))
-@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
+@click.option("--device", default=None, help="Filter by device MAC address or alias")
+@click.option("--protocol", default=None, help="Filter by L4 or L7 protocol (tcp, udp, tls, http, dns)")
+@click.option("--external-only", is_flag=True, help="Show only traffic to/from external IPs")
+@click.option("--internal-only", is_flag=True, help="Show only traffic between local devices")
+@click.option("--since", default=None, help="Show only flows active since this period (24h, 7d)")
+@click.option("--min-bytes", default=None, type=int, help="Show only flows with at least N bytes")
+@click.option("--format", "fmt", default="table", type=click.Choice(["table", "json", "csv"]),
+              help="Output format (default: table)")
+@click.option("--db", default=DEFAULT_DB, help="SQLite database path [default: ~/.netwatch/netwatch.db]")
 def flows_list(
     device: str | None,
     protocol: str | None,
@@ -293,7 +314,11 @@ def flows_list(
     fmt: str,
     db: str,
 ) -> None:
-    """List network flows."""
+    """List network flows with protocol, SNI, and traffic volume.
+
+    Flows are bidirectional per local device. Use --external-only to focus
+    on IoT devices talking to the internet, or --internal-only for local
+    traffic (e.g. camera to NVR)."""
     from netwatch.output import format_output
 
     database = _get_db(db)
@@ -326,12 +351,13 @@ def flows_list(
 # --- summary ---
 
 @main.command("summary")
-@click.option("--since", default=None, help="Period (e.g. 7d, 30d)")
-@click.option("--group-by", default="device", help="Group by field")
-@click.option("--format", "fmt", default="table", type=click.Choice(["table", "json", "csv"]))
-@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
+@click.option("--since", default=None, help="Show only activity from this period (24h, 7d, 30d)")
+@click.option("--group-by", default="device", help="Group results by: device")
+@click.option("--format", "fmt", default="table", type=click.Choice(["table", "json", "csv"]),
+              help="Output format (default: table)")
+@click.option("--db", default=DEFAULT_DB, help="SQLite database path [default: ~/.netwatch/netwatch.db]")
 def summary(since: str | None, group_by: str, fmt: str, db: str) -> None:
-    """Show traffic summary."""
+    """Show aggregated traffic summary by device, destination, and country."""
     from netwatch.output import format_output
 
     database = _get_db(db)
@@ -355,12 +381,13 @@ def summary(since: str | None, group_by: str, fmt: str, db: str) -> None:
 # --- export ---
 
 @main.command("export")
-@click.option("--format", "fmt", default="csv", type=click.Choice(["json", "csv"]))
-@click.option("--output", "-o", default=None, help="Output file (stdout if omitted)")
-@click.option("--since", default=None, help="Export data since period (e.g. 30d)")
-@click.option("--db", default=DEFAULT_DB, help="SQLite database path")
+@click.option("--format", "fmt", default="csv", type=click.Choice(["json", "csv"]),
+              help="Export format: csv or json (default: csv)")
+@click.option("--output", "-o", default=None, help="Output file path (stdout if omitted)")
+@click.option("--since", default=None, help="Export only flows from this period (24h, 7d, 30d)")
+@click.option("--db", default=DEFAULT_DB, help="SQLite database path [default: ~/.netwatch/netwatch.db]")
 def export(fmt: str, output: str | None, since: str | None, db: str) -> None:
-    """Export data for external analysis."""
+    """Export all flows for external analysis (spreadsheets, scripts, etc.)."""
     from netwatch.output import format_output
 
     database = _get_db(db)
@@ -394,9 +421,9 @@ def export(fmt: str, output: str | None, since: str | None, db: str) -> None:
 # --- config ---
 
 @main.command("config")
-@click.option("--db", default=DEFAULT_DB, help="Show/set default database path")
+@click.option("--db", default=DEFAULT_DB, help="Database path to check [default: ~/.netwatch/netwatch.db]")
 def config(db: str) -> None:
-    """Show configuration."""
+    """Show database configuration and basic stats."""
     db_path = Path(db).expanduser()
     click.echo(f"Database: {db_path}")
     if db_path.exists():
@@ -407,6 +434,34 @@ def config(db: str) -> None:
         click.echo(f"  Total bytes: {_human_bytes(stats['total_bytes'])}")
     else:
         click.echo("  (database not yet created)")
+
+
+# --- update-oui ---
+
+@main.command("update-oui")
+@click.option("--url", default=None,
+              help="URL of the OUI database (default: nmap-mac-prefixes from GitHub)")
+@click.option("--output", default=None,
+              help="Output file path (default: data/oui.txt relative to project root)")
+def update_oui(url: str | None, output: str | None) -> None:
+    """Download the MAC vendor (OUI) database for device identification.
+
+    After downloading, 'capture start' and 'analyze offline' will automatically
+    resolve MAC addresses to vendor names (e.g. Hikvision, Intelbras, TP-Link).
+    The file is saved to data/oui.txt by default."""
+    from netwatch.enrichment.fetch import DEFAULT_OUI_URL, DEFAULT_OUI_PATH, download_oui
+
+    out = Path(output).expanduser() if output else DEFAULT_OUI_PATH
+    src = url or DEFAULT_OUI_URL
+
+    click.echo(f"Baixando OUI de {src} ...", err=True)
+    try:
+        db = download_oui(url=src, output=out)
+    except Exception as exc:
+        click.echo(f"Erro ao baixar OUI: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Salvo {db.count()} prefixos OUI em {out}")
 
 
 # --- helpers ---

@@ -13,10 +13,11 @@ pip install -e .            # install deps (click, scapy)
 netwatch                    # CLI entry (click group in netwatch/cli.py)
 netwatch capture start -i wlp0s20f3 --duration 30s --db ./netwatch.db  # live capture + ingest
 netwatch analyze offline capture.pcap --db ./netwatch.db
+netwatch update-oui                  # download MAC vendor DB to data/oui.txt
 netwatch devices list --db <path>   # also: flows list, summary, export
 ```
 
-Working: `capture start/stop/status`, `analyze offline`, `devices list/rename/tag`, `flows list`, `summary`, `export`, `config`.
+Working: `capture start/stop/status`, `analyze offline`, `update-oui`, `devices list/rename/tag`, `flows list`, `summary`, `export`, `config`.
 Out of scope: `alerts check`, `watch`, enrichment flags, `--capture-payload`.
 
 ## Git / GitHub
@@ -43,7 +44,9 @@ netwatch/
 │   ├── flow.py         # 5-tuple flow aggregation, bidirectional
 │   ├── protocol.py     # L4 header + L7 (port table + DPI: TLS, HTTP, SSH)
 │   └── device.py       # MAC extraction, hostname from DNS
-├── enrichment/oui.py   # OUIDatabase: MAC→vendor lookup
+├── enrichment/
+│   ├── oui.py           # OUIDatabase: MAC→vendor lookup (6/7/9 hex prefixes)
+│   └── fetch.py         # download_oui(): baixa nmap-mac-prefixes para data/oui.txt
 └── storage/
     ├── db.py           # SQLite Database class (WAL mode) + CRUD
     └── models.py       # dataclasses: Device, Flow, DNSLog; enums: L4Protocol, Direction
@@ -61,7 +64,7 @@ netwatch/
 - Default DB: `~/.netwatch/netwatch.db`; auto-creates parent dirs and schema.
 - Live capture needs root/CAP_NET_RAW; offline pcap processing does not.
 - `capture start` runs in foreground (`--duration` or Ctrl+C) and ingests packets in batches through the same `build_flows`/`collect_devices` path as `analyze offline`. Live capture state lives in `~/.netwatch/capture.status` (written by the capturing process — if run via sudo, state goes to root's home, so `stop`/`status` must run as the same user).
-- `analyze offline` auto-finds `data/oui.txt` for OUI lookup if present.
+- `analyze offline` auto-finds `data/oui.txt` for OUI lookup if present. `netwatch update-oui` downloads it (nmap-mac-prefixes); `data/oui.txt` is gitignored.
 
 ## Conventions
 
